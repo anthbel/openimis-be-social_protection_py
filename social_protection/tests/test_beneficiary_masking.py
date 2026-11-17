@@ -204,17 +204,18 @@ class BeneficiaryMaskingTest(openIMISGraphQLTestCase):
         self.assertTrue(rows)
         return {column: {row[column] for row in rows} for column in rows[0]}
 
-    def test_the_group_export_writes_the_head_columns_masked(self):
-        fields = ["id", "jsonExt", "headFirstName", "headLastName", "headDob"]
-        cells = self.group_exported_cells(self.viewer, fields)
-        self.assertEqual((cells["head_first_name"], cells["head_dob"], cells["head_last_name"]),
-                         ({MASKED}, {MASKED}, {"Lovelace"}))
-        cells = self.group_exported_cells(
-            self.viewer, [*fields, "group.groupindividuals.individual.firstName"])
-        self.assertEqual((cells["head_first_name"], cells["group__groupindividuals__individual__first_name"]),
-                         ({MASKED}, {MASKED}))
-        cells = self.group_exported_cells(self.unmasked, fields)
-        self.assertEqual((cells["head_first_name"], cells["head_dob"]), ({"Ada"}, {"1980-01-02"}))
+    def test_the_group_export_refuses_the_head_and_member_columns(self):
+        for field, column in (("headFirstName", "head_first_name"), ("headLastName", "head_last_name"),
+                              ("headDob", "head_dob"), ("group.groupindividuals.individual.firstName",
+                                                        "group__groupindividuals__individual__first_name")):
+            for user in (self.viewer, self.unmasked):
+                with self.subTest(column=column, user=user.username):
+                    exports = ExportableQueryModel.objects.count()
+                    content = self.query_as(user, '{ groupBeneficiaryExport(benefitPlan_Id: "%s", fields: ["id", '
+                                                  '"jsonExt", "%s"], fieldsColumns: "{}") }'
+                                            % (self.group_plan.id, field))
+                    self.assertIn(f"the export column {column} is not exportable", json.dumps(content["errors"]))
+                    self.assertEqual(ExportableQueryModel.objects.count(), exports)
 
     def test_the_group_export_writes_the_group_copy_masked(self):
         cells = self.group_exported_cells(self.viewer, ["id", "jsonExt"])

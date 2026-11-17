@@ -110,6 +110,10 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         ]
     }
     exportable_fields = ['beneficiary', 'group_beneficiary']
+    export_relation_columns = {
+        'beneficiary': ('individual__first_name', 'individual__last_name', 'individual__dob'),
+        'group_beneficiary': ('group__id',),
+    }
     module_name = "social_protection"
     object_type = "BenefitPlan"
 
