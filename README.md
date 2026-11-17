@@ -51,7 +51,9 @@ It is dedicated to be deployed as a module of [openimis-be_py](https://github.co
 ## Enrolment hooks
 Another module checks every write of enrolments (`Beneficiary`, `GroupBeneficiary`) by registering a hook with
 `social_protection.enrolment_hooks.register_enrolment_hook(hook)`, usually in its `AppConfig.ready()`. With no hook
-registered, the writes behave as without the hooks, each path in a transaction of its own.
+registered, each of these writers still runs in a transaction of its own: a failure part way rolls back the
+whole write (a confirmation, an enrolment task, an import, a workflow run, a `bulk_save` call), which then writes
+nothing.
 - `hook.before_service_write(model, obj_data, creating)`: `BeneficiaryService` and `GroupBeneficiaryService` call
   it in the transaction of their `create` and `update`, before the row is read. It may adjust `obj_data`; a
   `ValidationError` it raises is returned as the service's error result (`{'success': False, ...}`).

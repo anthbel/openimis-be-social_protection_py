@@ -144,6 +144,12 @@ class BaseGroupColumnAggregationClass(ItemsUploadTaskCompletionEvent):
                 if group_id:
                     source.group_id = group_id
                     source.save(username=user.username)
+                    # A group the import updates may already be enrolled in the plan; it keeps that enrolment.
+                    if GroupBeneficiary.objects.filter(
+                            group_id=group_id, benefit_plan=benefit_plan, is_deleted=False).exists():
+                        logger.info("Group import %s: group %s already enrolled in plan %s, skipped",
+                                    upload_id, group_id, benefit_plan.id)
+                        continue
                     group_beneficiary = GroupBeneficiary(
                         group_id=group_id,
                         benefit_plan=benefit_plan,

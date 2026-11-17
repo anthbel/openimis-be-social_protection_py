@@ -149,6 +149,20 @@ class EnrolmentHooksTest(TestCase):
         BaseGroupColumnAggregationClass.group_data_sources_into_entities(upload.id, self.admin, self.group_plan)
         self.assertWriteBetweenHooks(GroupBeneficiary, self.group_plan, 1)
 
+    def test_the_import_of_validated_groups_keeps_the_enrolment_of_a_group_already_enrolled(self):
+        _, enrolled, _ = create_group_with_individual(self.admin.username)
+        _, other, _ = create_group_with_individual(self.admin.username)
+        GroupBeneficiary(group=enrolled, benefit_plan=self.group_plan, status=BeneficiaryStatus.ACTIVE,
+                         json_ext={}).save(user=self.admin)
+        upload = IndividualDataSourceUpload(source_name="sp-hooks-groups", source_type="group import")
+        upload.save(user=self.admin)
+        for group in (enrolled, other):
+            GroupDataSource(upload=upload, json_ext={"id": str(group.id), "code": group.code}).save(user=self.admin)
+        BaseGroupColumnAggregationClass.group_data_sources_into_entities(upload.id, self.admin, self.group_plan)
+        live = GroupBeneficiary.objects.filter(benefit_plan=self.group_plan, is_deleted=False)
+        self.assertEqual(sorted((row.group_id, row.status) for row in live), sorted([
+            (enrolled.id, BeneficiaryStatus.ACTIVE), (other.id, POTENTIAL)]))
+
     def test_the_sql_workflows_run_between_the_hooks(self):
         workflow = SqlProcedurePythonWorkflow.__new__(SqlProcedurePythonWorkflow)
         workflow.benefit_plan = self.plan
