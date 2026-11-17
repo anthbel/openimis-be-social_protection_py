@@ -76,6 +76,8 @@ class CreateGenericBeneficiaryInputType(OpenIMISMutation.Input):
 
 class UpdateGenericBeneficiaryInputType(CreateGenericBeneficiaryInputType):
     id = graphene.UUID(required=True)
+    # An update without status (or with a null one) keeps the stored status.
+    status = graphene.Field(CreateGenericBeneficiaryInputType.BeneficiaryStatusEnum, required=False)
 
 
 class CreateBeneficiaryInputType(CreateGenericBeneficiaryInputType):
@@ -322,6 +324,8 @@ class UpdateBeneficiaryMutation(
             data.pop('client_mutation_id')
         if "client_mutation_label" in data:
             data.pop('client_mutation_label')
+        if data.get("status") is None:
+            data.pop("status", None)
 
         service = BeneficiaryService(user)
         if SocialProtectionConfig.gql_check_beneficiary_crud:
@@ -470,6 +474,8 @@ class UpdateGroupBeneficiaryMutation(
             data.pop('client_mutation_id')
         if "client_mutation_label" in data:
             data.pop('client_mutation_label')
+        if data.get("status") is None:
+            data.pop("status", None)
 
         service = GroupBeneficiaryService(user)
         if SocialProtectionConfig.gql_check_group_beneficiary_crud:
