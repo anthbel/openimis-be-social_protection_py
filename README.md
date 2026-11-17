@@ -101,8 +101,8 @@ For a user without the masked-data right (core `gql_query_enable_viewing_masked_
   them. Their business data writes the person's name with each masked name column shown as the mask.
 * The tasks `calcrule_social_protection` creates for a payment above the limit per transaction (source
   `calcrule_social_protection`) are masked through the same task mask: their `data`, the string form of the
-  beneficiary's bill, keeps that form with the bill's `terms` and the `code` of its lines (the person's names, or the
-  group's code) shown as the mask, for a beneficiary while a name column of `individual`'s person mask is masked, for a
+  beneficiary's bill, keeps that form with the bill's `terms` and the `code` of its lines (the person's names or the
+  group's code with calcrule_social_protection 1.3.0, the beneficiary's id with the RSU fork) shown as the mask, for a beneficiary while a name column of `individual`'s person mask is masked, for a
   group beneficiary while `individual`'s group mask masks `code`. While either is masked, data that cannot be read as
   that bill is masked whole.
 * `BeneficiaryGQLType` and `GroupBeneficiaryGQLType` apply the mask on every path that reaches them (`beneficiary`,

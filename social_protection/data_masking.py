@@ -11,8 +11,8 @@ from social_protection.models import Beneficiary, GroupBeneficiary
 # The two copies of the beneficiary a maker-checker task holds in its data.
 TASK_DATA_KEYS = ("incoming_data", "current_data")
 # The source of the tasks calcrule_social_protection creates for a payment above the limit per transaction. Their
-# data is the string form of a dict holding the beneficiary's bill: its terms and the code of its line carry the
-# person's names ("First-Last") or the group's code.
+# data is the string form of a dict holding the beneficiary's bill: its terms and the code of its line name the
+# beneficiary, by the person's names ("First-Last") or the group's code, or by the beneficiary's id.
 CALCRULE_TASK_SOURCE = "calcrule_social_protection"
 # The group_beneficiary annotations reading the head's fields, with the lookups they read.
 HEAD_LOOKUPS = {

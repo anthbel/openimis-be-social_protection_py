@@ -1,6 +1,7 @@
 """The task calcrule_social_protection creates for a payment exceeding the transaction limit holds, in its data, the
-bill of the beneficiary: its terms and line code carry the person's names or the group's code. For a reader without
-the masked-data right they are masked while the person mask masks a name column, or the group mask the code."""
+bill of the beneficiary: its terms and line code name the beneficiary, by the person's names or the group's code
+(calcrule_social_protection 1.3.0) or by the beneficiary's id. For a reader without the masked-data right they are
+masked while the person mask masks a name column, or the group mask the code."""
 import ast
 import datetime
 import json
@@ -54,6 +55,7 @@ class CalcruleTaskMaskingTest(openIMISGraphQLTestCase):
         beneficiary.save(user=admin)
         group_beneficiary = GroupBeneficiary(group=group, benefit_plan=group_plan, status="ACTIVE", json_ext={})
         group_beneficiary.save(user=admin)
+        self.group_beneficiary = group_beneficiary
         cycle = PaymentCycle(code="CMASK-C", start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 1, 31),
                              status=PaymentCycle.PaymentCycleStatus.ACTIVE)
         cycle.save(user=admin)
@@ -90,6 +92,17 @@ class CalcruleTaskMaskingTest(openIMISGraphQLTestCase):
         self.assertGreaterEqual(len(nodes), 4)
         return [ast.literal_eval(json.loads(node["data"])) for node in nodes]
 
+    def stored_line_codes(self, unit=None):
+        """The line codes the calcrule tasks store, those of ``unit``'s bill only when it is given."""
+        codes = set()
+        for data in Task.objects.filter(source=SOURCE).values_list("data", flat=True):
+            results = ast.literal_eval(data)
+            if unit is None or results["bill_data"]["subject_id"] == str(unit.id):
+                codes.update(line["code"] for line in results["bill_data_line"])
+        self.assertTrue(codes)
+        self.assertNotIn(MASKED, codes)
+        return codes
+
     def test_the_names_and_group_codes_are_masked_without_the_masked_data_right(self):
         for results in self.bills(self.viewer):
             self.assertEqual(results["bill_data"]["terms"], MASKED)
@@ -98,13 +111,14 @@ class CalcruleTaskMaskingTest(openIMISGraphQLTestCase):
             self.assertEqual(results["benefit"]["benefit_data"]["amount"], 150.0)
 
     def test_the_bill_is_clear_with_the_masked_data_right(self):
-        codes = sorted(line["code"] for results in self.bills(self.unmasked) for line in results["bill_data_line"])
-        self.assertEqual(set(codes), {"Ada-Lovelace", "CMASK-G1"})
+        codes = {line["code"] for results in self.bills(self.unmasked) for line in results["bill_data_line"]}
+        self.assertEqual(codes, self.stored_line_codes())
+        self.assertEqual(len(codes), 2)
 
     def test_an_unmasked_unit_is_clear(self):
         with mock.patch.dict(GroupMask._sources, {"test": lambda: []}):
             codes = {line["code"] for results in self.bills(self.viewer) for line in results["bill_data_line"]}
-        self.assertEqual(codes, {MASKED, "CMASK-G1"})
+        self.assertEqual(codes, {MASKED} | self.stored_line_codes(self.group_beneficiary))
 
     def test_data_that_cannot_be_read_is_masked_whole(self):
         Task.objects.filter(source=SOURCE).update(data="{'bill_data': Decimal('1')} Ada-Lovelace")
