@@ -31,6 +31,10 @@ It is dedicated to be deployed as a module of [openimis-be_py](https://github.co
 * updateGroupBeneficiary
 * deleteGroupBeeficiary
 
+`createBeneficiary` and `createGroupBeneficiary` require `status`. In `updateBeneficiary` and `updateGroupBeneficiary`
+it is optional: an update without `status`, or with a null one, keeps the stored status and sends none to the service
+or to the maker-checker task, so the enrolment hooks see the write as one that does not change the status.
+
 ## Services
 - BenefitPlan
   - create
