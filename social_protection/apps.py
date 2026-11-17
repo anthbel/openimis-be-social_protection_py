@@ -297,6 +297,11 @@ class SocialProtectionConfig(AppConfig):
         MaskingClassRegistryPoint.register_masking_class(
             masking_class_list=[BeneficiaryMask(), GroupBeneficiaryMask()]
         )
+        from individual.task_masking import TaskMask
+        from social_protection.data_masking import beneficiary_task_masker
+        from social_protection.services import BeneficiaryService, GroupBeneficiaryService
+        TaskMask.register_source(BeneficiaryService.__name__, beneficiary_task_masker(BeneficiaryMask))
+        TaskMask.register_source(GroupBeneficiaryService.__name__, beneficiary_task_masker(GroupBeneficiaryMask))
 
     @staticmethod
     def get_beneficiary_upload_file_path(benefit_plan_id, file_name=None):

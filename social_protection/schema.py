@@ -1,3 +1,5 @@
+import logging
+
 import graphene
 import pandas as pd
 
@@ -8,6 +10,7 @@ from django.db.models import (
 from django.core.exceptions import PermissionDenied
 from individual.data_masking import (
     check_filter_lookups, custom_filter_lookups, may_see_masked, order_lookups, reads_masked_field,
+    unmasked_order_by as individual_unmasked_order_by,
 )
 from individual.models import GroupIndividual
 
@@ -18,6 +21,7 @@ from core.schema import OrderedDjangoFilterConnectionField
 from core.services import wait_for_mutation
 from core.utils import append_validity_filter, validate_json_schema
 from social_protection.apps import SocialProtectionConfig
+from social_protection.data_masking import HEAD_LOOKUPS
 from social_protection.gql_mutations import (
     CreateBenefitPlanMutation,
     UpdateBenefitPlanMutation,
@@ -75,24 +79,25 @@ def patch_details(beneficiary_df: pd.DataFrame):
     return df_final
 
 
-# The group_beneficiary annotations ordering by the head's fields, with the lookups they read.
-HEAD_ORDER_LOOKUPS = {
-    "head_first_name": "group__groupindividuals__individual__first_name",
-    "head_last_name": "group__groupindividuals__individual__last_name",
-    "head_dob": "group__groupindividuals__individual__dob",
-}
+logger = logging.getLogger(__name__)
 GROUP_CUSTOM_FILTER_RELATION = "group__groupindividuals__individual"
 
 
 def unmasked_order_by(user, model, order_by):
-    """``order_by`` less its terms ordering by a masked field (a head annotation included), for a user without
-    the masked-data right: such an ordering would tell the masked values."""
-    if not order_by or may_see_masked(user):
+    """``order_by`` as ``individual``'s ``unmasked_order_by`` leaves it (masked terms left out, primary key
+    last), the terms ordering by a head annotation reading a masked field also left out."""
+    if not order_by:
         return order_by
-    terms = [order_by] if isinstance(order_by, str) else order_by
-    return [term for term in terms
-            if not any(reads_masked_field(model, HEAD_ORDER_LOOKUPS.get(lookup, lookup))
-                       for lookup in order_lookups([term]))]
+    terms = [order_by] if isinstance(order_by, str) else list(order_by)
+    if not may_see_masked(user):
+        dropped = [term for term in terms
+                   if any(lookup in HEAD_LOOKUPS and reads_masked_field(model, HEAD_LOOKUPS[lookup])
+                          for lookup in order_lookups([term]))]
+        if dropped:
+            logger.info("orderBy %s of %s left out for a user without the masked-data right",
+                        dropped, model.__name__)
+            terms = [term for term in terms if term not in dropped]
+    return individual_unmasked_order_by(user, model, terms) or [model._meta.pk.name]
 
 
 class MaskedOrderConnectionField(OrderedDjangoFilterConnectionField):

@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import types
 from functools import partial
 
@@ -7,15 +8,35 @@ from functools import partial
 from core.custom_filters import CustomFilterWizardStorage
 from core.models import ExportableQueryModel
 from core.gql.export_mixin import ExportableQueryMixin
-from individual.data_masking import check_filter_lookups, custom_filter_lookups, filter_lookups, mask_export_columns
+from individual.data_masking import (
+    check_filter_lookups, custom_filter_lookups, export_column_mask, filter_lookups, mask_export_columns,
+    may_see_masked,
+)
+from social_protection.data_masking import HEAD_LOOKUPS
 
-logger = logging.getLogger(__file__)
+
+def _is_null(value):
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
+def mask_export_columns_through_aliases(model, user, data_frame):
+    """``mask_export_columns`` for a user without the masked-data right, each head annotation column masked as
+    the person field it reads (``HEAD_LOOKUPS``) rather than as a column naming no field."""
+    if user is not None and may_see_masked(user):
+        return data_frame
+    aliases = [alias for alias in HEAD_LOOKUPS if alias in data_frame.columns]
+    masked = mask_export_columns(model, user, data_frame.drop(columns=aliases))
+    for alias in aliases:
+        masker = export_column_mask(model, HEAD_LOOKUPS[alias])
+        masked[alias] = data_frame[alias] if masker is None else data_frame[alias].map(
+            lambda value, masker=masker: value if _is_null(value) else masker(value))
+    return masked[list(data_frame.columns)]
 
 
 class ExportableSocialProtectionQueryMixin(ExportableQueryMixin):
     """Exports reading the stored values, which no other mask reaches: for a user without the masked-data right,
     the filters and custom filters reading a masked field are refused, and the columns reading one are written
-    masked (``mask_export_columns``, applied before the field's patches)."""
+    masked (``mask_export_columns_through_aliases``, applied before the field's patches)."""
 
     @classmethod
     def create_export_function(cls, field_name):
@@ -41,7 +62,8 @@ class ExportableSocialProtectionQueryMixin(ExportableQueryMixin):
             qs = default_resolve(None, info, **kwargs)
             qs = qs.filter(**filter_kwargs)
             qs = cls.__append_custom_filters(custom_filters, qs, fields_mapping)
-            patches = [partial(mask_export_columns, model, user), *(cls.get_patches_for_field(field_name) or [])]
+            patches = [partial(mask_export_columns_through_aliases, model, user),
+                       *(cls.get_patches_for_field(field_name) or [])]
             export_file = ExportableQueryModel\
                 .create_csv_export(qs, export_fields, user, column_names=fields_mapping, patches=patches)
 
