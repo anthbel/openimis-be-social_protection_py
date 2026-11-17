@@ -48,6 +48,25 @@ It is dedicated to be deployed as a module of [openimis-be_py](https://github.co
 - BeneficiaryImport
   - import_beneficiaries
 
+## Enrolment hooks
+Another module checks every write of enrolments (`Beneficiary`, `GroupBeneficiary`) by registering a hook with
+`social_protection.enrolment_hooks.register_enrolment_hook(hook)`, usually in its `AppConfig.ready()`. With no hook
+registered, each of these writers still runs in a transaction of its own: a failure part way rolls back the
+whole write (a confirmation, an enrolment task, an import, a workflow run, a `bulk_save` call), which then writes
+nothing.
+- `hook.before_service_write(model, obj_data, creating)`: `BeneficiaryService` and `GroupBeneficiaryService` call
+  it in the transaction of their `create` and `update`, before the row is read. It may adjust `obj_data`; a
+  `ValidationError` it raises is returned as the service's error result (`{'success': False, ...}`).
+- `hook.before_write(model, plan_ids)` and `hook.after_write(model, plan_ids, state)`: the writers of enrolments
+  without the services run in a transaction between them (`enrolment_hooks.enrolment_write`): the direct
+  confirmation of an enrolment (`on_confirm_enrollment_of_group`, `on_confirm_enrollment_of_individual`), the
+  completion of an enrolment task and the import of validated group items (`on_validation_import_valid_items.py`),
+  the SQL upload and update workflows (`SqlProcedurePythonWorkflow`), the closing of a benefit plan, and
+  `Beneficiary.bulk_save` / `GroupBeneficiary.bulk_save`. A `ValidationError` raised by `after_write` rolls the
+  write back and reaches the writer's caller: the caller of `select_groups_to_benefit_plan` /
+  `select_individuals_to_benefit_plan` (the confirmation mutation), the upload of an enrolment task, a group
+  import or an SQL workflow (set `FAIL` with the message), or the caller of `bulk_save`.
+
 ## Configuration options (can be changed via core.ModuleConfiguration)
 * gql_benefit_plan_search_perms: required rights to call benefitPlan GraphQL Query (default: ["160001"])
 * gql_benefit_plan_create_perms: required rights to call createBenefitPlan GraphQL Mutation (default: ["160002"])

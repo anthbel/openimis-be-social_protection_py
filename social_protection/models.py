@@ -8,6 +8,7 @@ from core import models as core_models
 from core.models import UUIDModel, ObjectMutation, MutationLog
 from individual.models import Individual, Group, IndividualDataSourceUpload
 from location.models import Location
+from social_protection.enrolment_hooks import enrolment_write
 
 
 class BeneficiaryStatus(models.TextChoices):
@@ -206,7 +207,23 @@ class GroupBeneficiaryProjectEnrollment(core_models.HistoryBusinessModel):
         return f"{self.group_beneficiary.group.code} - {self.project.name}"
 
 
-class Beneficiary(core_models.HistoryBusinessModel):
+class EnrolmentBulkSaveMixin:
+    """HistoryModel.bulk_save of enrolments between the enrolment hooks (``enrolment_hooks.enrolment_write``) of
+    the benefit plans the rows are in or move to."""
+
+    @classmethod
+    def bulk_save(cls, data_list, user, batch_size=100, include_deleted=False):
+        plan_ids = set()
+        for data in data_list:
+            plan = data.get('benefit_plan')
+            plan_ids.add(data.get('benefit_plan_id') or getattr(plan, 'id', plan))
+        row_ids = [data['id'] for data in data_list if data.get('id')]
+        plan_ids.update(cls.objects.filter(id__in=row_ids).values_list('benefit_plan_id', flat=True))
+        with enrolment_write(cls, plan_ids):
+            return super().bulk_save(data_list, user, batch_size=batch_size, include_deleted=include_deleted)
+
+
+class Beneficiary(EnrolmentBulkSaveMixin, core_models.HistoryBusinessModel):
     @classmethod
     def get_rights(cls, action):
         """
@@ -347,7 +364,7 @@ class BenefitPlanDataUploadRecords(core_models.HistoryModel):
         return f"{self.benefit_plan.code} {self.data_upload.source_name} {self.workflow} {self.date_created}"
 
 
-class GroupBeneficiary(core_models.HistoryBusinessModel):
+class GroupBeneficiary(EnrolmentBulkSaveMixin, core_models.HistoryBusinessModel):
     @classmethod
     def get_rights(cls, action):
         """

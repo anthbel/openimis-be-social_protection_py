@@ -18,6 +18,7 @@ from individual.models import (
     IndividualDataSource,
     Individual,
 )
+from social_protection import enrolment_hooks
 from social_protection.apps import SocialProtectionConfig
 from social_protection.models import (
     BenefitPlan,
@@ -185,6 +186,14 @@ class BeneficiaryService(BaseService, CheckerLogicServiceMixin):
     def delete(self, obj_data):
         return super().delete(obj_data)
 
+    def _adjust_create_payload(self, payload_data):
+        enrolment_hooks.before_service_write(self.OBJECT_TYPE, payload_data, creating=True)
+        return super()._adjust_create_payload(payload_data)
+
+    def _adjust_update_payload(self, payload_data):
+        enrolment_hooks.before_service_write(self.OBJECT_TYPE, payload_data, creating=False)
+        return super()._adjust_update_payload(payload_data)
+
     def _business_data_serializer(self, data):
         def serialize(key, value):
             if key == 'id':
@@ -275,6 +284,14 @@ class GroupBeneficiaryService(BaseService, CheckerLogicServiceMixin):
     @register_service_signal('group_beneficiary_service.delete')
     def delete(self, obj_data):
         return super().delete(obj_data)
+
+    def _adjust_create_payload(self, payload_data):
+        enrolment_hooks.before_service_write(self.OBJECT_TYPE, payload_data, creating=True)
+        return super()._adjust_create_payload(payload_data)
+
+    def _adjust_update_payload(self, payload_data):
+        enrolment_hooks.before_service_write(self.OBJECT_TYPE, payload_data, creating=False)
+        return super()._adjust_update_payload(payload_data)
 
 
 class ProjectEnrollmentService:

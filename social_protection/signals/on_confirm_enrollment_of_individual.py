@@ -7,6 +7,7 @@ from individual.models import (
     IndividualDataSource
 )
 from social_protection.apps import SocialProtectionConfig
+from social_protection.enrolment_hooks import enrolment_write
 from social_protection.models import (
     Beneficiary,
     BenefitPlanDataUploadRecords,
@@ -72,20 +73,22 @@ def on_confirm_enrollment_of_individual(**kwargs):
             'json_ext': json_ext
         })
     else:
-        new_beneficiaries = []
-        for individual in individuals_to_upload:
-            # Create a new Beneficiary instance
-            beneficiary = Beneficiary(
-                individual=individual,
-                benefit_plan_id=benefit_plan_id,
-                status=status,
-                json_ext=individual.json_ext,
-                user_created=user,
-                user_updated=user,
-                uuid=uuid.uuid4(),
-            )
-            new_beneficiaries.append(beneficiary)
-        try:
-            Beneficiary.objects.bulk_create(new_beneficiaries)
-        except ValidationError as e:
-            logger.error(f"Validation error occurred: {e}")
+        # individuals_to_upload is evaluated inside the write, after the hooks' before_write.
+        with enrolment_write(Beneficiary, [benefit_plan_id]):
+            new_beneficiaries = []
+            for individual in individuals_to_upload:
+                # Create a new Beneficiary instance
+                beneficiary = Beneficiary(
+                    individual=individual,
+                    benefit_plan_id=benefit_plan_id,
+                    status=status,
+                    json_ext=individual.json_ext,
+                    user_created=user,
+                    user_updated=user,
+                    uuid=uuid.uuid4(),
+                )
+                new_beneficiaries.append(beneficiary)
+            try:
+                Beneficiary.objects.bulk_create(new_beneficiaries)
+            except ValidationError as e:
+                logger.error(f"Validation error occurred: {e}")

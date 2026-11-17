@@ -3,7 +3,6 @@ import uuid
 import random
 import string
 from django.contrib.postgres.aggregates import ArrayAgg
-from django.db import transaction
 from django.db.models import F
 from django.core.exceptions import ValidationError
 from typing import List
@@ -19,6 +18,7 @@ from individual.models import (
 )
 from individual.services import GroupService
 from social_protection.apps import SocialProtectionConfig
+from social_protection.enrolment_hooks import enrolment_write
 from social_protection.models import (
     Beneficiary,
     BenefitPlanDataUploadRecords,
@@ -132,24 +132,31 @@ class BaseGroupColumnAggregationClass(ItemsUploadTaskCompletionEvent):
             data_sources = data_sources.filter(id__in=accepted)
 
         service = GroupService(user)
-        for source in data_sources:
-            obj_data = source.json_ext
-            if obj_data.get('id'):
-                result = service.update(obj_data)
-            else:
-                result = service.create(obj_data)
+        with enrolment_write(GroupBeneficiary, [benefit_plan.id]):
+            for source in data_sources:
+                obj_data = source.json_ext
+                if obj_data.get('id'):
+                    result = service.update(obj_data)
+                else:
+                    result = service.create(obj_data)
 
-            group_id = result["data"].get('id')
-            if group_id:
-                source.group_id = group_id
-                source.save(username=user.username)
-                group_beneficiary = GroupBeneficiary(
-                    group_id=group_id,
-                    benefit_plan=benefit_plan,
-                    status='POTENTIAL',
-                    json_ext=result["data"].get('json_ext')
-                )
-                group_beneficiary.save(user=user)
+                group_id = result["data"].get('id')
+                if group_id:
+                    source.group_id = group_id
+                    source.save(username=user.username)
+                    # A group the import updates may already be enrolled in the plan; it keeps that enrolment.
+                    if GroupBeneficiary.objects.filter(
+                            group_id=group_id, benefit_plan=benefit_plan, is_deleted=False).exists():
+                        logger.info("Group import %s: group %s already enrolled in plan %s, skipped",
+                                    upload_id, group_id, benefit_plan.id)
+                        continue
+                    group_beneficiary = GroupBeneficiary(
+                        group_id=group_id,
+                        benefit_plan=benefit_plan,
+                        status='POTENTIAL',
+                        json_ext=result["data"].get('json_ext')
+                    )
+                    group_beneficiary.save(user=user)
 
     def set_group_aggregation_column(self, group_aggregation_column):
         if group_aggregation_column == 'null' or not group_aggregation_column:
@@ -373,7 +380,7 @@ def on_task_complete_action(business_event, **kwargs):
             benefit_plan_id = data['task']['json_ext']['benefit_plan_id']
             upload_id = data['task']['json_ext']['data_upload_id']
             user = User.objects.get(id=data['user']['id'])
-            with transaction.atomic():
+            with enrolment_write(Beneficiary, [benefit_plan_id]):
                 # Approvals of the same plan wait for each other, so each one sees
                 # the enrolments the previous one created.
                 BenefitPlan.objects.select_for_update(no_key=True).filter(id=benefit_plan_id).first()
@@ -413,7 +420,7 @@ def on_task_complete_action(business_event, **kwargs):
             benefit_plan_id = data['task']['json_ext']['benefit_plan_id']
             upload_id = data['task']['json_ext']['data_upload_id']
             user = User.objects.get(id=data['user']['id'])
-            with transaction.atomic():
+            with enrolment_write(GroupBeneficiary, [benefit_plan_id]):
                 # Approvals of the same plan wait for each other, so each one sees
                 # the enrolments the previous one created.
                 BenefitPlan.objects.select_for_update(no_key=True).filter(id=benefit_plan_id).first()
