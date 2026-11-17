@@ -12,7 +12,8 @@ from django.db import ProgrammingError, connection
 from core.models import User
 from individual.models import IndividualDataSource
 from social_protection.apps import SocialProtectionConfig
-from social_protection.models import BenefitPlan
+from social_protection.enrolment_hooks import enrolment_write
+from social_protection.models import Beneficiary, BenefitPlan, GroupBeneficiary
 from social_protection.services import BeneficiaryImportService
 from social_protection.utils import load_dataframe
 from workflow.exceptions import PythonWorkflowHandlerException
@@ -103,7 +104,9 @@ class SqlProcedurePythonWorkflow(BasePythonWorkflowExecutor):
             raise PythonWorkflowHandlerException(str(e))
 
     def _execute_sql_logic(self, sql_func: str, params: Iterable):
-        with connection.cursor() as cursor:
+        enrolment_model = (GroupBeneficiary if self.benefit_plan.type == BenefitPlan.BenefitPlanType.GROUP_TYPE
+                           else Beneficiary)
+        with enrolment_write(enrolment_model, [self.benefit_plan.id]), connection.cursor() as cursor:
             # current_upload_id = self.upload_uuid
             # userUUID = self.user_uuid
             # benefitPlan = self.benefit_plan_uuid

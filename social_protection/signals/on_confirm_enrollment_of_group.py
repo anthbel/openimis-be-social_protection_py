@@ -8,6 +8,7 @@ from individual.models import (
     GroupIndividual
 )
 from social_protection.apps import SocialProtectionConfig
+from social_protection.enrolment_hooks import enrolment_write
 from social_protection.models import (
     BenefitPlanDataUploadRecords,
     BenefitPlan,
@@ -85,19 +86,21 @@ def on_confirm_enrollment_of_group(**kwargs):
             'json_ext': json_ext
         })
     else:
-        for group in groups_to_upload:
-            head_group_individual = GroupIndividual.objects.filter(
-                is_deleted=False,
-                group=group,
-                role=GroupIndividual.Role.HEAD
-            ).first()
-            group_beneficiary = GroupBeneficiary(
-                group=group,
-                benefit_plan_id=benefit_plan_id,
-                status=status,
-                json_ext=head_group_individual.individual.json_ext
-            )
-            try:
-                group_beneficiary.save(username=user.username)
-            except ValidationError as e:
-                logger.error(f"Validation error occurred: {e}")
+        # groups_to_upload is evaluated inside the write, after the hooks' before_write.
+        with enrolment_write(GroupBeneficiary, [benefit_plan_id]):
+            for group in groups_to_upload:
+                head_group_individual = GroupIndividual.objects.filter(
+                    is_deleted=False,
+                    group=group,
+                    role=GroupIndividual.Role.HEAD
+                ).first()
+                group_beneficiary = GroupBeneficiary(
+                    group=group,
+                    benefit_plan_id=benefit_plan_id,
+                    status=status,
+                    json_ext=head_group_individual.individual.json_ext
+                )
+                try:
+                    group_beneficiary.save(username=user.username)
+                except ValidationError as e:
+                    logger.error(f"Validation error occurred: {e}")

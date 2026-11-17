@@ -181,7 +181,7 @@ class BeneficiaryServiceTest(TestCase):
         )
 
         result, uuid = create_and_update_to_active(
-            self.individual, self.benefit_plan
+            self.individual2, self.benefit_plan
         )
         self.assertFalse(
             result.get('success', True),
