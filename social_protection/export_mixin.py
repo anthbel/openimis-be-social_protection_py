@@ -4,6 +4,7 @@ import math
 import types
 from functools import partial
 
+from django.core.exceptions import PermissionDenied
 
 from core.custom_filters import CustomFilterWizardStorage
 from core.models import ExportableQueryModel
@@ -38,6 +39,20 @@ class ExportableSocialProtectionQueryMixin(ExportableQueryMixin):
     the filters and custom filters reading a masked field are refused, and the columns reading one are written
     masked (``mask_export_columns_through_aliases``, applied before the field's patches)."""
 
+    # The columns of an export that follow a relation, by exported field: those the frontends request.
+    export_relation_columns = {}
+
+    @classmethod
+    def check_export_columns(cls, field_name, model, columns):
+        """Refuses an export whose ``columns`` name a column other than ``model``'s own columns, its ``json_ext``
+        keys and the ``export_relation_columns`` of ``field_name``: a column following any other relation reads
+        rows outside the reader's scope."""
+        allowed = {name for field in model._meta.concrete_fields for name in (field.name, field.attname)}
+        allowed.update(cls.export_relation_columns.get(field_name, ()))
+        for column in columns:
+            if column not in allowed and not column.startswith("json_ext__"):
+                raise PermissionDenied(f"the export column {column} is not exportable")
+
     @classmethod
     def create_export_function(cls, field_name):
         new_function_name = f"resolve_{field_name}_export"
@@ -51,9 +66,10 @@ class ExportableSocialProtectionQueryMixin(ExportableQueryMixin):
         def exporter(cls, self, info, **kwargs):
             custom_filters = kwargs.pop("customFilters", None)
             export_fields = [cls._adjust_notation(f) for f in kwargs.pop('fields')]
+            source_field = getattr(cls, field_name)
+            cls.check_export_columns(field_name, source_field.model, export_fields)
             fields_mapping = json.loads(kwargs.pop('fields_columns'))
 
-            source_field = getattr(cls, field_name)
             filter_kwargs = {k: v for k, v in kwargs.items() if k in source_field.filtering_args}
             user, model = info.context.user, source_field.model
             check_filter_lookups(user, model, filter_lookups(source_field.filterset_class, filter_kwargs)

@@ -118,9 +118,14 @@ For a user without the masked-data right (core `gql_query_enable_viewing_masked_
   `json_ext` of a plan, project or activity, for instance) is left out and logged at info level, and the primary key
   orders last. An unmasked `json_ext` key of a beneficiary still orders. `headFirstName`, `headLastName` and `headDob` are checked as the head's fields they read;
   `isEligible`, the eligibility result each row shows, orders for every user.
+* An export column of `beneficiaryExport` and `groupBeneficiaryExport` is one of the exported model's own columns (by
+  field or column name), its `json_ext` or a `json_ext` key (`jsonExt.<key>`), or, for `beneficiaryExport`, the
+  person's `individual.firstName`, `individual.lastName` and `individual.dob`, and for `groupBeneficiaryExport`,
+  `group.id`. Any other column (one following any other relation, the head columns `headFirstName`, `headLastName`
+  and `headDob`, `isEligible`) is refused before the export runs, naming the column
+  (`the export column <column> is not exportable`), whoever the user.
 * `beneficiaryExport` and `groupBeneficiaryExport` refuse the same filters and write the columns reading a masked field
-  masked (a whole `jsonExt` column with its masked keys masked), as `individual`'s exports do; the head columns
-  (`headFirstName`, `headLastName`, `headDob`) are masked as the person fields they read.
+  masked (a whole `jsonExt` column with its masked keys masked), as `individual`'s exports do.
 * `validate_import_beneficiaries` validates only the rows of the upload the user may see (`IndividualDataSource`
   row scope: the uploader's and reviewers' for pending rows) and returns them masked by `individual`'s upload row mask,
   with the validation result of each masked key masked but its success.
