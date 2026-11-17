@@ -12,6 +12,7 @@ from pandas import DataFrame
 from calculation.services import get_calculation_object
 from core.services import BaseService
 from core.signals import register_service_signal
+from individual.task_masking import person_name
 from individual.models import (
     IndividualDataSourceUpload,
     IndividualDataSource,
@@ -188,14 +189,13 @@ class BeneficiaryService(BaseService, CheckerLogicServiceMixin):
         def serialize(key, value):
             if key == 'id':
                 beneficiary = Beneficiary.objects.get(id=value)
-                individual = beneficiary.individual
-                return f'{individual.first_name} {individual.last_name}'
+                return person_name(self.user, beneficiary.individual)
             elif key == 'benefit_plan_id':
                 benefit_plan = BenefitPlan.objects.get(id=value)
                 return benefit_plan.__str__()
             elif key == 'individual_id':
                 individual = Individual.objects.get(id=value)
-                return f'{individual.first_name} {individual.last_name}'
+                return person_name(self.user, individual)
             else:
                 return value
 

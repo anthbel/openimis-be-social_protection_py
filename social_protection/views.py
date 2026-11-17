@@ -11,9 +11,11 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from core.data_masking import MaskingClassStorage
 from core.utils import DefaultStorageFileHandler
 from core.views import check_user_rights
 from individual.apps import IndividualConfig
+from individual.data_masking import JSON_PREFIX, mask_for_user, may_see_masked
 from individual.models import IndividualDataSource
 from social_protection.apps import SocialProtectionConfig
 from social_protection.models import BenefitPlan
@@ -193,6 +195,7 @@ def validate_import_beneficiaries(request):
             raise ValueError('{}: {}'.format(
                 result.get("message"), result.get("details")
             ))
+        _mask_validated_rows(user, result.get('data') or [])
 
         # for now just return info if df valid
         return Response(result)
@@ -258,6 +261,7 @@ def download_invalid_items(request):
 
         data_from_source = []
         for invalid_item in invalid_items:
+            mask_for_user(request.user, "IndividualDataSource", invalid_item)
             json_ext = invalid_item.json_ext
             invalid_item.json_ext["id"] = invalid_item.id
             invalid_item.json_ext["error"] = invalid_item.validations
@@ -293,6 +297,11 @@ def download_invalid_items(request):
     IndividualConfig.gql_individual_search_perms,
 )])
 def download_beneficiary_upload(request):
+    # The file holds the uploaded person values, which no mask reaches.
+    mask = MaskingClassStorage.get_masking_class("IndividualDataSource")
+    if not may_see_masked(request.user) and mask is not None and mask.masking_enabled:
+        return Response({'success': False, 'error': _("The uploaded file needs the right to view masked data")},
+                        status=status.HTTP_403_FORBIDDEN)
     try:
         benefit_plan_id = request.query_params.get('benefit_plan_id')
         filename = request.query_params.get('filename')
@@ -413,8 +422,9 @@ def _resolve_validate_import_beneficiaries_args(request):
     benefit_plan = BenefitPlan.objects.filter(
         uuid=benefit_plan_uuid, is_deleted=False
     ).first()
-    individual_sources = IndividualDataSource.objects.filter(
-        upload_id=upload_id
+    # The rows the user may see: the uploader's and reviewers' for pending rows.
+    individual_sources = IndividualDataSource.get_queryset(
+        IndividualDataSource.objects.filter(upload_id=upload_id), request.user
     )
 
     if not benefit_plan:
@@ -423,6 +433,26 @@ def _resolve_validate_import_beneficiaries_args(request):
         )
 
     return upload_id, individual_sources, benefit_plan
+
+
+def _mask_validated_rows(user, validated_rows):
+    """Masks in place, for a user without the masked-data right, the validated upload rows by the upload row
+    mask: each row's masked keys, and the validation result of each masked key (all but its success)."""
+    mask = MaskingClassStorage.get_masking_class("IndividualDataSource")
+    if may_see_masked(user) or mask is None or not mask.masking_enabled:
+        return validated_rows
+    paths = [field[len(JSON_PREFIX):].split(".") for field in mask.anon_fields if field.startswith(JSON_PREFIX)]
+    for item in validated_rows:
+        row, validations = item.get('row'), item.get('validations')
+        if isinstance(row, dict):
+            for path in paths:
+                mask._anonymize_dict_field(row, path)
+        if isinstance(validations, dict):
+            for key in {path[0] for path in paths}:
+                if isinstance(validations.get(key), dict):
+                    validations[key] = {name: value if name == 'success' else mask.anonymize(value)
+                                        for name, value in validations[key].items()}
+    return validated_rows
 
 
 def _resolve_create_task_with_importing_valid_items(request):

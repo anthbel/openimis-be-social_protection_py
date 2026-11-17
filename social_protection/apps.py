@@ -223,8 +223,7 @@ class SocialProtectionConfig(AppConfig):
         # Workflow needs to be re-registered, otherwise default/invalid ones would apply
         self._set_up_workflows()
 
-        # TODO: handle reloading of masking configs
-        logger.info(f"Reloaded app configs (except masking configs) for {self.name} module")
+        logger.info(f"Reloaded app configs for {self.name} module")
 
     def _set_up_workflows(self):
         from workflow.systems.python import PythonWorkflowAdaptor
@@ -298,6 +297,11 @@ class SocialProtectionConfig(AppConfig):
         MaskingClassRegistryPoint.register_masking_class(
             masking_class_list=[BeneficiaryMask(), GroupBeneficiaryMask()]
         )
+        from individual.task_masking import TaskMask
+        from social_protection.data_masking import beneficiary_task_masker
+        from social_protection.services import BeneficiaryService, GroupBeneficiaryService
+        TaskMask.register_source(BeneficiaryService.__name__, beneficiary_task_masker(BeneficiaryMask))
+        TaskMask.register_source(GroupBeneficiaryService.__name__, beneficiary_task_masker(GroupBeneficiaryMask))
 
     @staticmethod
     def get_beneficiary_upload_file_path(benefit_plan_id, file_name=None):

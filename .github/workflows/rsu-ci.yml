@@ -8,7 +8,8 @@ on:
 
 # Runs the module's tests on the openIMIS release/26.10 assembly, restricted to the modules it
 # needs, on the openIMIS database image. The individual module is installed from the RSU fork's
-# INDIVIDUAL_REF branch, whose masking API the module imports.
+# INDIVIDUAL_REF branch, whose masking API the module imports, and tasks_management from the RSU
+# fork (rsu/26.10), which applies the task masks the module registers.
 
 jobs:
   test:
@@ -31,13 +32,18 @@ jobs:
     env:
       ASSEMBLY_REF: release/26.10
       MODULE_NAME: social_protection
-      BASE_MODULES: core individual workflow tasks_management location medical medical_pricelist calculation contribution_plan payment_cycle invoice calcrule_social_protection payroll opensearch_reports
+      BASE_MODULES: core individual workflow location medical medical_pricelist calculation contribution_plan payment_cycle invoice calcrule_social_protection payroll opensearch_reports
       INDIVIDUAL_REF: rsu/26.10
-      EXTRA_MODULES: ""
+      EXTRA_MODULES: "tasks_management"
     steps:
       - uses: actions/checkout@v7
         with:
           path: current-module
+      - uses: actions/checkout@v7
+        with:
+          repository: anthbel/openimis-be-tasks_management_py
+          ref: rsu/26.10
+          path: dep-tasks_management
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
