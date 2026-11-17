@@ -1,5 +1,6 @@
 """Every ordered connection of the module leaves out, for a user without the masked-data right, an orderBy term
-whose path reads a masked field or traverses a JSON field, through any relation."""
+whose path reads a masked field or traverses a JSON field no mask describes, through any relation; an unmasked
+json_ext key of a beneficiary still orders."""
 import datetime
 import json
 from unittest import mock
@@ -26,7 +27,7 @@ class MaskedOrderingTest(openIMISGraphQLTestCase):
         patcher = mock.patch.dict(IndividualMask._sources, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
-        IndividualMask.register_fields("test", lambda: ["first_name"])
+        IndividualMask.register_fields("test", lambda: ["first_name", "json_ext.phone"])
         self.village = village = create_test_village({"name": "Ordering village", "code": "MoV"})
         district = village.parent.parent.code
         self.admin = admin = create_right_only_user("mord_admin", PERMS, [district])
@@ -58,13 +59,13 @@ class MaskedOrderingTest(openIMISGraphQLTestCase):
                                 location=village, json_ext={})
             person.save(user=admin)
             beneficiary = Beneficiary(individual=person, benefit_plan=self.person_plan, status="ACTIVE",
-                                      json_ext={"nickname": value})
+                                      json_ext={"nickname": value, "phone": value})
             beneficiary.save(user=admin)
             self.beneficiaries[str(beneficiary.uuid)] = value
             group = Group(code=f"MO-G{index}", location=village, json_ext={})
             group.save(user=admin)
             group_beneficiary = GroupBeneficiary(group=group, benefit_plan=self.group_plan, status="ACTIVE",
-                                                 json_ext={"roof": value})
+                                                 json_ext={"roof": value, "phone": value})
             group_beneficiary.save(user=admin)
             self.group_beneficiaries[str(group_beneficiary.uuid)] = value
 
@@ -120,13 +121,26 @@ class MaskedOrderingTest(openIMISGraphQLTestCase):
         self.assert_ordering_left_out("projectHistory", 'search: "MO-J"', "jsonExt__note", "name",
                                       self.by_index("MO-J"))
 
-    def test_beneficiaries_by_an_unmasked_json_ext_key(self):
+    def test_beneficiaries_by_a_masked_json_ext_key(self):
         self.assert_ordering_left_out("beneficiary", 'benefitPlan_Id: "%s"' % self.person_plan.id,
-                                      "jsonExt__nickname", "uuid", self.beneficiaries)
+                                      "jsonExt__phone", "uuid", self.beneficiaries)
 
-    def test_group_beneficiaries_by_an_unmasked_json_ext_key(self):
+    def test_group_beneficiaries_by_a_masked_json_ext_key(self):
         self.assert_ordering_left_out("groupBeneficiary", 'benefitPlan_Id: "%s"' % self.group_plan.id,
-                                      "jsonExt__roof", "uuid", self.group_beneficiaries)
+                                      "jsonExt__phone", "uuid", self.group_beneficiaries)
+
+    def assert_ordering_kept(self, connection, arguments, lookup, key, values):
+        for user in (self.viewer, self.unmasked):
+            self.assertEqual(self.ordered(user, connection, arguments, lookup, key, values), ["Abel", "Zelda"])
+            self.assertEqual(self.ordered(user, connection, arguments, f"-{lookup}", key, values), ["Zelda", "Abel"])
+
+    def test_beneficiaries_by_an_unmasked_json_ext_key_still_order(self):
+        self.assert_ordering_kept("beneficiary", 'benefitPlan_Id: "%s"' % self.person_plan.id,
+                                  "jsonExt__nickname", "uuid", self.beneficiaries)
+
+    def test_group_beneficiaries_by_an_unmasked_json_ext_key_still_order(self):
+        self.assert_ordering_kept("groupBeneficiary", 'benefitPlan_Id: "%s"' % self.group_plan.id,
+                                  "jsonExt__roof", "uuid", self.group_beneficiaries)
 
     def test_the_eligibility_annotation_still_orders(self):
         from social_protection.schema import unmasked_order_by
