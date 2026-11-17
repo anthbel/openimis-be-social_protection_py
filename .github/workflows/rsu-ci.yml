@@ -31,7 +31,7 @@ jobs:
     env:
       ASSEMBLY_REF: release/26.10
       MODULE_NAME: social_protection
-      BASE_MODULES: core individual workflow tasks_management location medical medical_pricelist calculation contribution_plan payment_cycle invoice calcrule_social_protection payroll
+      BASE_MODULES: core individual workflow tasks_management location medical medical_pricelist calculation contribution_plan payment_cycle invoice calcrule_social_protection payroll opensearch_reports
       INDIVIDUAL_REF: rsu/26.10
       EXTRA_MODULES: ""
     steps:
