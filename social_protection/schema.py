@@ -1,5 +1,3 @@
-import logging
-
 import graphene
 import pandas as pd
 
@@ -8,16 +6,13 @@ from django.db.models import (
     Q, Case, When, BooleanField, Value, OuterRef, Subquery
 )
 from django.core.exceptions import PermissionDenied
-from individual.data_masking import (
-    check_filter_lookups, custom_filter_lookups, may_see_masked, order_lookups, reads_masked_field,
-    unmasked_order_by as individual_unmasked_order_by,
-)
+from individual.data_masking import check_filter_lookups, custom_filter_lookups, masked_order_by
+from individual.gql_queries import MaskedOrderedConnectionField
 from individual.models import GroupIndividual
 
 from django.utils.translation import gettext as _
 from core.custom_filters import CustomFilterWizardStorage
 from core.gql_queries import ValidationMessageGQLType
-from core.schema import OrderedDjangoFilterConnectionField
 from core.services import wait_for_mutation
 from core.utils import append_validity_filter, validate_json_schema
 from social_protection.apps import SocialProtectionConfig
@@ -79,36 +74,25 @@ def patch_details(beneficiary_df: pd.DataFrame):
     return df_final
 
 
-logger = logging.getLogger(__name__)
 GROUP_CUSTOM_FILTER_RELATION = "group__groupindividuals__individual"
 
 
+# The annotations the beneficiary resolvers add: the head's fields, and ``is_eligible``, the result of the plan's
+# eligibility check each row shows.
+BENEFICIARY_ORDER_ALIASES = {**HEAD_LOOKUPS, "is_eligible": ()}
+
+
 def unmasked_order_by(user, model, order_by):
-    """``order_by`` as ``individual``'s ``unmasked_order_by`` leaves it (masked terms left out, primary key
-    last), the terms ordering by a head annotation reading a masked field also left out."""
-    if not order_by:
-        return order_by
-    terms = [order_by] if isinstance(order_by, str) else list(order_by)
-    if not may_see_masked(user):
-        dropped = [term for term in terms
-                   if any(lookup in HEAD_LOOKUPS and reads_masked_field(model, HEAD_LOOKUPS[lookup])
-                          for lookup in order_lookups([term]))]
-        if dropped:
-            logger.info("orderBy %s of %s left out for a user without the masked-data right",
-                        dropped, model.__name__)
-            terms = [term for term in terms if term not in dropped]
-    return individual_unmasked_order_by(user, model, terms) or [model._meta.pk.name]
+    """``order_by`` as ``individual``'s ``masked_order_by`` leaves it, the beneficiary annotations checked as the
+    lookups they are computed from."""
+    return masked_order_by(user, model, order_by, BENEFICIARY_ORDER_ALIASES)
 
 
-class MaskedOrderConnectionField(OrderedDjangoFilterConnectionField):
-    """Core's ordered connection leaving out the ``orderBy`` terms that order by a masked field."""
+class BeneficiaryOrderedConnectionField(MaskedOrderedConnectionField):
+    """``individual``'s masked ordered connection, the beneficiary annotations checked as the lookups they are
+    computed from."""
 
-    @classmethod
-    def resolve_queryset(cls, connection, iterable, info, args, filtering_args, filterset_class):
-        if args.get("orderBy"):
-            args = {**args, "orderBy": unmasked_order_by(
-                info.context.user, filterset_class._meta.model, args["orderBy"])}
-        return super().resolve_queryset(connection, iterable, info, args, filtering_args, filterset_class)
+    order_aliases = BENEFICIARY_ORDER_ALIASES
 
 
 class BfTypeEnum(graphene.Enum):
@@ -129,7 +113,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
     module_name = "social_protection"
     object_type = "BenefitPlan"
 
-    benefit_plan = OrderedDjangoFilterConnectionField(
+    benefit_plan = MaskedOrderedConnectionField(
         BenefitPlanGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -142,7 +126,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         search=graphene.String(),
         sort_alphabetically=graphene.Boolean(),
     )
-    beneficiary = MaskedOrderConnectionField(
+    beneficiary = BeneficiaryOrderedConnectionField(
         BeneficiaryGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -155,7 +139,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         client_mutation_id=graphene.String(),
         customFilters=graphene.List(of_type=graphene.String),
     )
-    group_beneficiary = MaskedOrderConnectionField(
+    group_beneficiary = BeneficiaryOrderedConnectionField(
         GroupBeneficiaryGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -169,7 +153,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         customFilters=graphene.List(of_type=graphene.String),
     )
 
-    beneficiary_data_upload_history = OrderedDjangoFilterConnectionField(
+    beneficiary_data_upload_history = MaskedOrderedConnectionField(
         BenefitPlanDataUploadQGLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -198,7 +182,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         bf_type=graphene.Argument(BfTypeEnum),
         description="Endpoint for getting all fields from all BF schemas"
     )
-    benefit_plan_history = OrderedDjangoFilterConnectionField(
+    benefit_plan_history = MaskedOrderedConnectionField(
         BenefitPlanHistoryGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -212,14 +196,14 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         sort_alphabetically=graphene.Boolean(),
     )
 
-    activity = OrderedDjangoFilterConnectionField(
+    activity = MaskedOrderedConnectionField(
         ActivityGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         applyDefaultValidityFilter=graphene.Boolean(),
         client_mutation_id=graphene.String(),
     )
 
-    project = OrderedDjangoFilterConnectionField(
+    project = MaskedOrderedConnectionField(
         ProjectGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         applyDefaultValidityFilter=graphene.Boolean(),
@@ -235,7 +219,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         description="Checks that the specified Project name is valid"
     )
 
-    project_history = OrderedDjangoFilterConnectionField(
+    project_history = MaskedOrderedConnectionField(
         ProjectHistoryGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         client_mutation_id=graphene.String(),

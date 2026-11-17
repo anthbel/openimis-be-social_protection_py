@@ -81,8 +81,13 @@ For a user without the masked-data right (core `gql_query_enable_viewing_masked_
   `Group.groupbeneficiarySet`, any other nested path), `jsonExt` included.
 * A filter reading a masked field is refused, naming the lookup, on every connection of the two types: the person and
   group filters, `search` (person names, `json_ext`, group code and head names), and `customFilters` (on the
-  beneficiary's `json_ext`, or the members' `json_ext` for group beneficiaries). An `orderBy` term ordering by a masked
-  field (`headFirstName`, `headLastName`, `headDob` included) is left out, and the primary key orders last.
+  beneficiary's `json_ext`, or the members' `json_ext` for group beneficiaries).
+* Every ordered connection of the module (`benefitPlan`, `benefitPlanHistory`, `beneficiaryDataUploadHistory`,
+  `activity`, `project`, `projectHistory`, `beneficiary`, `groupBeneficiary`) is `individual`'s
+  `MaskedOrderedConnectionField`: an `orderBy` term whose path reads a masked field or traverses a JSON field, through
+  any relation (`json_ext` keys, masked or not, included), is left out and logged at info level, and the primary key
+  orders last. `headFirstName`, `headLastName` and `headDob` are checked as the head's fields they read;
+  `isEligible`, the eligibility result each row shows, orders for every user.
 * `beneficiaryExport` and `groupBeneficiaryExport` refuse the same filters and write the columns reading a masked field
   masked (a whole `jsonExt` column with its masked keys masked), as `individual`'s exports do; the head columns
   (`headFirstName`, `headLastName`, `headDob`) are masked as the person fields they read.
