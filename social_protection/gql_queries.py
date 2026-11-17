@@ -8,6 +8,7 @@ import django_filters
 
 from contribution_plan.models import PaymentPlan
 from core import prefix_filterset, ExtendedConnection
+from individual.data_masking import check_filter_lookups, filter_lookups, mask_once, masking_resolver
 from individual.models import GroupIndividual
 from individual.gql_queries import IndividualGQLType, GroupGQLType, \
     IndividualDataSourceUploadGQLType
@@ -42,6 +43,23 @@ class JsonExtMixin:
         if _have_permissions(info.context.user, perms):
             return self.json_ext
         return None
+
+
+class MaskedFilterSetMixin:
+    """Refuses to a user without the masked-data right a filter reading a masked field, naming the lookup; the
+    ``search`` filter reads ``search_lookups``. Applies on every connection using the filter set."""
+
+    search_lookups = ()
+
+    def filter_queryset(self, queryset):
+        user = getattr(self.request, "user", None)
+        if user is not None:
+            values = self.form.cleaned_data
+            lookups = filter_lookups(type(self), values)
+            if values.get("search"):
+                lookups += list(self.search_lookups)
+            check_filter_lookups(user, self._meta.model, lookups)
+        return super().filter_queryset(queryset)
 
 
 class BenefitPlanGQLType(DjangoObjectType, JsonExtMixin):
@@ -199,9 +217,10 @@ class BeneficiarySharedFilterMixin:
 
 
 class BeneficiaryFilter(
-    django_filters.FilterSet, BeneficiarySharedFilterMixin
+    MaskedFilterSetMixin, django_filters.FilterSet, BeneficiarySharedFilterMixin
 ):
     location_prefix = "individual__"
+    search_lookups = ("individual__first_name", "individual__last_name", "json_ext")
     is_eligible = django_filters.BooleanFilter(method='filter_is_eligible')
     search = django_filters.CharFilter(method='filter_search')
     location = django_filters.CharFilter(method='filter_location')
@@ -284,8 +303,12 @@ class BeneficiaryGQLType(DjangoObjectType, JsonExtMixin):
     class Meta:
         model = Beneficiary
         interfaces = (graphene.relay.Node,)
+        default_resolver = masking_resolver("Beneficiary")
         filterset_class = BeneficiaryFilter
         connection_class = ExtendedConnection
+
+    def resolve_json_ext(self, info):
+        return JsonExtMixin.resolve_json_ext(mask_once(info, self, "Beneficiary"), info)
 
     def resolve_is_eligible(self, info):
         return self.is_eligible
@@ -297,9 +320,11 @@ class BeneficiaryGQLType(DjangoObjectType, JsonExtMixin):
 
 
 class GroupBeneficiaryFilter(
-    django_filters.FilterSet, BeneficiarySharedFilterMixin
+    MaskedFilterSetMixin, django_filters.FilterSet, BeneficiarySharedFilterMixin
 ):
     location_prefix = "group__"
+    search_lookups = ("group__code", "json_ext", "group__groupindividuals__individual__first_name",
+                      "group__groupindividuals__individual__last_name")
     is_eligible = django_filters.BooleanFilter(method='filter_is_eligible')
     search = django_filters.CharFilter(method='filter_search')
     location = django_filters.CharFilter(method='filter_location')
@@ -390,8 +415,12 @@ class GroupBeneficiaryGQLType(DjangoObjectType, JsonExtMixin):
     class Meta:
         model = GroupBeneficiary
         interfaces = (graphene.relay.Node,)
+        default_resolver = masking_resolver("GroupBeneficiary")
         filterset_class = GroupBeneficiaryFilter
         connection_class = ExtendedConnection
+
+    def resolve_json_ext(self, info):
+        return JsonExtMixin.resolve_json_ext(mask_once(info, self, "GroupBeneficiary"), info)
 
     def resolve_is_eligible(self, info):
         return self.is_eligible

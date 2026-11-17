@@ -63,6 +63,25 @@ It is dedicated to be deployed as a module of [openimis-be_py](https://github.co
 * gql_check_group_beneficiary_crud: specifies whether Group Beneficiary should use tasks based approval (default: True),
 
 
+## Data masking
+For a user without the masked-data right (core `gql_query_enable_viewing_masked_data_perms`, 900101):
+* `Beneficiary` and `GroupBeneficiary` are masked by `beneficiary_mask_fields` and `group_beneficiary_mask_fields` (while
+  `social_protection_masking_enabled`), the fields other modules register with `register_fields`, and the `json_ext`
+  paths of `individual`'s person mask: a beneficiary's `json_ext` is a copy of its person's, a group beneficiary's a copy
+  of its head's. The fields are read each time a mask is applied, so a reloaded configuration applies.
+* `BeneficiaryGQLType` and `GroupBeneficiaryGQLType` apply the mask on every path that reaches them (`beneficiary`,
+  `groupBeneficiary`, `BenefitPlan.beneficiarySet` and `.groupbeneficiarySet`, `Individual.beneficiarySet`,
+  `Group.groupbeneficiarySet`, any other nested path), `jsonExt` included.
+* A filter reading a masked field is refused, naming the lookup, on every connection of the two types: the person and
+  group filters, `search` (person names, `json_ext`, group code and head names), and `customFilters` (on the
+  beneficiary's `json_ext`, or the members' `json_ext` for group beneficiaries). An `orderBy` term ordering by a masked
+  field (`headFirstName`, `headLastName`, `headDob` included) is left out.
+* `beneficiaryExport` and `groupBeneficiaryExport` refuse the same filters and write the columns reading a masked field
+  masked (a whole `jsonExt` column with its masked keys masked), as `individual`'s exports do.
+* `download_invalid_items` masks each row by `individual`'s upload row mask; `download_beneficiary_upload_file`, which
+  returns the stored file, is refused while that mask masks any field.
+
+
 ## openIMIS Modules Dependencies
 - core
 - individual

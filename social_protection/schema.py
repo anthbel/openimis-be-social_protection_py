@@ -6,6 +6,9 @@ from django.db.models import (
     Q, Case, When, BooleanField, Value, OuterRef, Subquery
 )
 from django.core.exceptions import PermissionDenied
+from individual.data_masking import (
+    check_filter_lookups, custom_filter_lookups, may_see_masked, order_lookups, reads_masked_field,
+)
 from individual.models import GroupIndividual
 
 from django.utils.translation import gettext as _
@@ -72,6 +75,37 @@ def patch_details(beneficiary_df: pd.DataFrame):
     return df_final
 
 
+# The group_beneficiary annotations ordering by the head's fields, with the lookups they read.
+HEAD_ORDER_LOOKUPS = {
+    "head_first_name": "group__groupindividuals__individual__first_name",
+    "head_last_name": "group__groupindividuals__individual__last_name",
+    "head_dob": "group__groupindividuals__individual__dob",
+}
+GROUP_CUSTOM_FILTER_RELATION = "group__groupindividuals__individual"
+
+
+def unmasked_order_by(user, model, order_by):
+    """``order_by`` less its terms ordering by a masked field (a head annotation included), for a user without
+    the masked-data right: such an ordering would tell the masked values."""
+    if not order_by or may_see_masked(user):
+        return order_by
+    terms = [order_by] if isinstance(order_by, str) else order_by
+    return [term for term in terms
+            if not any(reads_masked_field(model, HEAD_ORDER_LOOKUPS.get(lookup, lookup))
+                       for lookup in order_lookups([term]))]
+
+
+class MaskedOrderConnectionField(OrderedDjangoFilterConnectionField):
+    """Core's ordered connection leaving out the ``orderBy`` terms that order by a masked field."""
+
+    @classmethod
+    def resolve_queryset(cls, connection, iterable, info, args, filtering_args, filterset_class):
+        if args.get("orderBy"):
+            args = {**args, "orderBy": unmasked_order_by(
+                info.context.user, filterset_class._meta.model, args["orderBy"])}
+        return super().resolve_queryset(connection, iterable, info, args, filtering_args, filterset_class)
+
+
 class BfTypeEnum(graphene.Enum):
     INDIVIDUAL = BenefitPlan.BenefitPlanType.INDIVIDUAL_TYPE
     GROUP = BenefitPlan.BenefitPlanType.GROUP_TYPE
@@ -103,7 +137,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         search=graphene.String(),
         sort_alphabetically=graphene.Boolean(),
     )
-    beneficiary = OrderedDjangoFilterConnectionField(
+    beneficiary = MaskedOrderConnectionField(
         BeneficiaryGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -116,7 +150,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         client_mutation_id=graphene.String(),
         customFilters=graphene.List(of_type=graphene.String),
     )
-    group_beneficiary = OrderedDjangoFilterConnectionField(
+    group_beneficiary = MaskedOrderConnectionField(
         GroupBeneficiaryGQLType,
         orderBy=graphene.List(of_type=graphene.String),
         dateValidFrom__Gte=graphene.DateTime(),
@@ -311,6 +345,7 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         def _apply_custom_filters(query, **kwargs):
             custom_filters = kwargs.get("customFilters")
             if custom_filters:
+                check_filter_lookups(info.context.user, Beneficiary, custom_filter_lookups(custom_filters))
                 query = CustomFilterWizardStorage \
                     .build_custom_filters_queryset(
                         Query.module_name,
@@ -408,13 +443,15 @@ class Query(ExportableSocialProtectionQueryMixin, graphene.ObjectType):
         def _apply_custom_filters(query, **kwargs):
             custom_filters = kwargs.get("customFilters")
             if custom_filters:
+                check_filter_lookups(info.context.user, GroupBeneficiary,
+                                     custom_filter_lookups(custom_filters, GROUP_CUSTOM_FILTER_RELATION))
                 query = CustomFilterWizardStorage \
                     .build_custom_filters_queryset(
                         Query.module_name,
                         Query.object_type,
                         custom_filters,
                         query,
-                        "group__groupindividuals__individual",
+                        GROUP_CUSTOM_FILTER_RELATION,
                     )
             return query
 
